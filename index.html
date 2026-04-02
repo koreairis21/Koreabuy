@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>連線代購系統</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap');
+        :root {
+            --primary-color: #D6A6A6;
+            --secondary-color: #F4E7E7;
+            --text-brown: #6D4C4C;
+        }
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background-color: #FAF7F7;
+            color: var(--text-brown);
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+        }
+        .bg-primary { background-color: var(--primary-color); }
+        .text-primary { color: var(--primary-color); }
+        .bg-soft { background-color: var(--secondary-color); }
+        .nav-tab.active {
+            color: var(--text-brown);
+            font-weight: 700;
+            border-bottom: 3px solid var(--primary-color);
+        }
+        .btn-click:active { transform: scale(0.92); opacity: 0.7; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .modal-overlay {
+            background-color: rgba(0,0,0,0.5);
+            backdrop-filter: blur(2px);
+        }
+    </style>
+</head>
+<body>
+    <div id="app" class="max-w-md mx-auto min-h-screen bg-white shadow-xl flex flex-col relative">
+        
+        <!-- Header -->
+        <header class="bg-primary p-5 pt-8 text-white rounded-b-[30px] shadow-md">
+            <div class="flex justify-between items-start">
+                <h1 class="text-xl font-bold">🇰🇷 連線代購系統</h1>
+                <div class="text-right">
+                    <p class="text-[10px] opacity-80">預計總利潤</p>
+                    <p class="text-lg font-bold">+ ${{ totalProfit }}</p>
+                </div>
+            </div>
+            <nav class="flex justify-between mt-6 px-2 border-t border-white/20 pt-4">
+                <button @click="view = 'order'" class="nav-tab pb-2 text-sm" :class="{active: view === 'order'}">現場入單</button>
+                <button @click="view = 'summary'" class="nav-tab pb-2 text-sm" :class="{active: view === 'summary'}">採購統計</button>
+                <button @click="view = 'customers'" class="nav-tab pb-2 text-sm" :class="{active: view === 'customers'}">結帳明細</button>
+                <button @click="view = 'admin'" class="nav-tab pb-2 text-sm" :class="{active: view === 'admin'}">商品設定</button>
+            </nav>
+        </header>
+
+        <main class="flex-1 p-5 overflow-y-auto pb-32">
+            
+            <!-- 1. 現場入單 -->
+            <section v-if="view === 'order'">
+                <div class="mb-6">
+                    <label class="block text-sm font-bold mb-2 opacity-70">1. 客戶錄入</label>
+                    <div class="flex gap-2">
+                        <select v-model="activeId" class="flex-1 bg-soft border-0 p-3 rounded-2xl outline-none text-sm shadow-inner">
+                            <option value="">選擇現有客戶...</option>
+                            <option v-for="c in customers" :key="c.id" :value="c.id">{{ c.name }}</option>
+                        </select>
+                        <button type="button" @click="showAddCustomerModal = true" class="btn-click bg-primary text-white w-12 h-12 rounded-2xl flex items-center justify-center shadow-md">＋</button>
+                    </div>
+                </div>
+
+                <div v-if="activeCustomer">
+                    <div class="mb-4">
+                        <label class="block text-sm font-bold mb-2 opacity-70">2. 選購商品</label>
+                        <select v-model="filterCat" class="w-full bg-white border border-gray-200 p-3 rounded-2xl outline-none text-sm shadow-sm">
+                            <option value="">全部類別</option>
+                            <option v-for="cat in categories" :key="cat" :value="cat">{{ cat }}</option>
+                        </select>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div v-for="p in filteredProducts" :key="p.id" 
+                             @click="adjustQty(p.id, 1)"
+                             class="btn-click bg-white p-3 rounded-2xl shadow-sm border border-gray-100 relative">
+                            <div class="text-[10px] bg-soft px-2 py-0.5 rounded inline-block text-primary font-bold mb-1">{{ p.category }}</div>
+                            <div class="font-bold text-sm leading-tight h-10 overflow-hidden">{{ p.name }}</div>
+                            <div class="text-primary font-bold mt-1">${{ p.price }}</div>
+                            <div v-if="getItemQty(p.id) > 0" class="absolute -top-2 -right-2 bg-rose-500 text-white w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border-2 border-white shadow-md">
+                                {{ getItemQty(p.id) }}
+                            </div>
+                            <div v-if="getItemQty(p.id) > 0" class="mt-2 text-center" @click.stop>
+                                <button @click.stop="adjustQty(p.id, -1)" class="w-full bg-gray-100 text-gray-500 text-[10px] py-1 rounded-lg btn-click">減少數量 -1</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div v-else class="text-center py-20 opacity-30">
+                    <p class="text-4xl mb-2">📒</p>
+                    <p>請先新增客戶以開始入單</p>
+                </div>
+            </section>
+
+            <!-- 2. 採購清單 -->
+            <section v-if="view === 'summary'">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="font-bold text-lg">📦 分批採購進度</h2>
+                    <button @click="exportCSV" class="btn-click text-[10px] bg-primary text-white px-3 py-1 rounded-full shadow-sm">匯出清單</button>
+                </div>
+                <div class="space-y-3">
+                    <div v-if="Object.keys(purchaseSummary).length === 0" class="text-center py-10 opacity-40">目前尚無任何入單數據</div>
+                    <div v-for="item in purchaseSummary" :key="item.name" class="bg-white p-4 rounded-[20px] shadow-sm border border-gray-50">
+                        <div class="flex justify-between items-start mb-2">
+                            <div>
+                                <p class="font-bold text-sm">{{ item.name }}</p>
+                                <p class="text-[10px] opacity-50">成本 ${{ item.cost }} | 售價 ${{ item.price }}</p>
+                            </div>
+                            <div class="text-right">
+                                <div class="text-xs font-bold" :class="getBoughtQty(item.name) >= item.qty ? 'text-green-500' : 'text-orange-500'">
+                                    採購進度：{{ getBoughtQty(item.name) }} / {{ item.qty }}
+                                </div>
+                                <button @click="openBatchModal(item.name)" class="btn-click text-[10px] bg-soft text-primary px-2 py-1 rounded mt-1 font-bold">登記採買</button>
+                            </div>
+                        </div>
+                        <div class="w-full bg-gray-100 h-1.5 rounded-full mt-1 overflow-hidden">
+                            <div class="bg-primary h-full transition-all duration-500" :style="{ width: Math.min((getBoughtQty(item.name) / item.qty) * 100, 100) + '%' }"></div>
+                        </div>
+                        <div class="flex justify-between items-center border-t border-dashed pt-2 mt-3">
+                            <span class="text-[10px] opacity-60 font-medium">預計總利潤：</span>
+                            <span class="text-sm font-bold text-green-600">+${{ (item.price - item.cost) * item.qty }}</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 3. 結帳明細 -->
+            <section v-if="view === 'customers'">
+                <div class="mb-4 space-y-2">
+                    <div class="flex gap-2">
+                        <input v-model="search" type="text" placeholder="搜尋姓名..." class="flex-1 bg-soft p-3 rounded-2xl text-sm outline-none">
+                        <select v-model="payFilter" class="bg-white border p-3 rounded-2xl text-xs outline-none">
+                            <option value="all">顯示全部</option>
+                            <option value="unpaid">僅看未結帳</option>
+                        </select>
+                    </div>
+                </div>
+                <div v-for="c in filteredCustomers" :key="c.id" class="mb-4 border border-gray-100 rounded-[20px] overflow-hidden shadow-sm bg-white">
+                    <div class="p-4 bg-soft flex justify-between items-center">
+                        <span class="font-bold">{{ c.name }}</span>
+                        <div class="flex gap-2">
+                            <button type="button" @click="confirmDelete('customer', c.id)" class="btn-click text-xs text-red-400 p-2">🗑️</button>
+                            <button @click="togglePaid(c)" class="btn-click text-[10px] px-2 py-1 rounded-lg" :class="c.isPaid ? 'bg-green-500 text-white':'bg-white text-primary border border-primary'">
+                                {{ c.isPaid ? '已結清' : '未結帳' }}
+                            </button>
+                            <button @click="copyOrder(c)" class="btn-click text-[10px] bg-primary text-white px-2 py-1 rounded-lg">複製清單</button>
+                        </div>
+                    </div>
+                    <div class="p-4">
+                        <div v-for="item in c.items" class="flex justify-between text-xs mb-1">
+                            <span>{{ item.name }} x {{ item.qty }}</span>
+                            <span>${{ item.price * item.qty }}</span>
+                        </div>
+                        <p class="text-right mt-2 font-bold text-primary border-t pt-2">總計收款 ${{ getCustomerTotal(c) }}</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 4. 商品設定 -->
+            <section v-if="view === 'admin'">
+                <div class="bg-soft p-5 rounded-[25px] mb-6 shadow-inner">
+                    <h3 class="font-bold mb-3 text-sm">🛒 連線商品資料庫</h3>
+                    <div class="space-y-2">
+                        <input v-model="newP.name" type="text" placeholder="商品名稱" class="w-full p-3 rounded-xl border-0 text-sm">
+                        <input v-model="newP.category" type="text" placeholder="類別" class="w-full p-3 rounded-xl border-0 text-sm">
+                        <div class="flex gap-2">
+                            <input v-model.number="newP.cost" type="number" placeholder="成本" class="w-1/2 p-3 rounded-xl border-0 text-sm">
+                            <input v-model.number="newP.price" type="number" placeholder="售價" class="w-1/2 p-3 rounded-xl border-0 text-sm">
+                        </div>
+                        <button @click="handleAddProduct" class="btn-click w-full bg-primary text-white font-bold py-3 rounded-xl shadow-md mt-2">存入資料庫</button>
+                    </div>
+                </div>
+                <div class="space-y-2">
+                    <div v-for="p in products" :key="p.id" class="flex justify-between items-center p-3 bg-white border border-gray-100 rounded-xl shadow-sm">
+                        <div>
+                            <div class="text-[10px] text-primary font-bold">{{ p.category }}</div>
+                            <div class="text-sm font-medium">{{ p.name }}</div>
+                            <div class="text-[10px] opacity-40">售價:${{p.price}} | 預計利潤:${{p.price - p.cost}}</div>
+                        </div>
+                        <button @click="confirmDelete('product', p.id)" class="btn-click text-xs text-red-300 p-2">🗑️ 刪除</button>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- 底部 -->
+        <footer v-if="view === 'order' && activeCustomer" class="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white/90 backdrop-blur-md p-5 border-t border-gray-100 flex justify-between items-center z-40">
+            <div>
+                <p class="text-[10px] opacity-50">錄入中：{{ activeCustomer.name }}</p>
+                <p class="text-lg font-bold text-primary">小計 ${{ getCustomerTotal(activeCustomer) }}</p>
+            </div>
+            <div class="flex gap-2">
+                <button @click="activeId = ''" class="bg-gray-100 text-gray-400 px-4 py-2 rounded-xl text-xs btn-click">更換客人</button>
+                <button @click="view = 'customers'" class="bg-primary text-white px-6 py-3 rounded-xl font-bold shadow-lg text-sm btn-click">明細一覽</button>
+            </div>
+        </footer>
+
+        <!-- Modals -->
+        <div v-if="showAddCustomerModal" class="modal-overlay fixed inset-0 z-[60] flex items-center justify-center p-6">
+            <div class="bg-white w-full rounded-[30px] p-6 shadow-2xl">
+                <h3 class="font-bold text-lg mb-4 text-center">新增對象</h3>
+                <input v-model="tempCustomerName" type="text" placeholder="輸入姓名" class="w-full p-4 bg-soft rounded-2xl outline-none border-2 border-transparent focus:border-primary mb-4">
+                <div class="flex gap-3">
+                    <button @click="showAddCustomerModal = false; tempCustomerName = ''" class="flex-1 py-3 rounded-2xl bg-gray-100 font-bold">取消</button>
+                    <button @click="submitAddCustomer" class="flex-1 py-3 rounded-2xl bg-primary text-white font-bold">確定新增</button>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="batchModal.show" class="modal-overlay fixed inset-0 z-[60] flex items-center justify-center p-6">
+            <div class="bg-white w-full rounded-[30px] p-6 shadow-2xl text-center">
+                <h3 class="font-bold text-lg mb-2">登記採買數</h3>
+                <p class="text-xs mb-4 opacity-50">{{ batchModal.itemName }}</p>
+                <div class="flex items-center justify-center gap-4 mb-6">
+                    <button @click="batchModal.qty = Math.max(0, batchModal.qty - 1)" class="w-12 h-12 bg-soft rounded-full text-xl font-bold">-</button>
+                    <input v-model.number="batchModal.qty" type="number" class="w-20 text-center text-2xl font-bold border-b-2 border-primary outline-none">
+                    <button @click="batchModal.qty++" class="w-12 h-12 bg-primary text-white rounded-full text-xl font-bold">+</button>
+                </div>
+                <div class="flex gap-3">
+                    <button @click="batchModal.show = false" class="flex-1 py-3 rounded-2xl bg-gray-100 font-bold">取消</button>
+                    <button @click="saveBatchQty" class="flex-1 py-3 rounded-2xl bg-primary text-white font-bold">更新進度</button>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="deleteConfirm.show" class="modal-overlay fixed inset-0 z-[60] flex items-center justify-center p-6">
+            <div class="bg-white w-full rounded-[30px] p-6 shadow-2xl">
+                <h3 class="font-bold text-lg mb-2 text-center text-red-500">確認刪除？</h3>
+                <p class="text-sm text-center mb-6 opacity-60">此動作無法還原喔！</p>
+                <div class="flex gap-3">
+                    <button @click="deleteConfirm.show = false" class="flex-1 py-3 rounded-2xl bg-gray-100 font-bold">先不要</button>
+                    <button @click="executeDelete" class="flex-1 py-3 rounded-2xl bg-red-500 text-white font-bold">確定刪除</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const { createApp, ref, computed, watch, onMounted } = Vue;
+
+        createApp({
+            setup() {
+                const view = ref('order');
+                const products = ref([]);
+                const customers = ref([]);
+                const boughtData = ref({});
+                
+                const activeId = ref('');
+                const filterCat = ref('');
+                const search = ref('');
+                const payFilter = ref('all');
+                const newP = ref({ name: '', category: '', price: 0, cost: 0 });
+
+                const showAddCustomerModal = ref(false);
+                const tempCustomerName = ref('');
+                const deleteConfirm = ref({ show: false, type: '', id: null });
+                const batchModal = ref({ show: false, itemName: '', qty: 0 });
+
+                // --- 1. 初始化讀取資料 ---
+                onMounted(() => {
+                    const savedProducts = localStorage.getItem('ko_sys_products');
+                    const savedCustomers = localStorage.getItem('ko_sys_customers');
+                    const savedBought = localStorage.getItem('ko_sys_bought');
+                    
+                    if (savedProducts) products.value = JSON.parse(savedProducts);
+                    if (savedCustomers) customers.value = JSON.parse(savedCustomers);
+                    if (savedBought) boughtData.value = JSON.parse(savedBought);
+                });
+
+                // --- 2. 自動監聽並儲存資料 ---
+                // 使用 Vue 的 watch 功能，當這三個核心資料發生變化時，立刻存入 localStorage
+                watch([products, customers, boughtData], () => {
+                    localStorage.setItem('ko_sys_products', JSON.stringify(products.value));
+                    localStorage.setItem('ko_sys_customers', JSON.stringify(customers.value));
+                    localStorage.setItem('ko_sys_bought', JSON.stringify(boughtData.value));
+                }, { deep: true });
+
+                // --- 計算屬性 ---
+                const categories = computed(() => [...new Set(products.value.map(p => p.category))]);
+                const activeCustomer = computed(() => customers.value.find(c => c.id === activeId.value));
+                const filteredProducts = computed(() => filterCat.value ? products.value.filter(p => p.category === filterCat.value) : products.value);
+                const filteredCustomers = computed(() => {
+                    let list = customers.value;
+                    if (search.value) list = list.filter(c => c.name.includes(search.value));
+                    if (payFilter.value === 'unpaid') list = list.filter(c => !c.isPaid);
+                    return list;
+                });
+
+                const purchaseSummary = computed(() => {
+                    const res = {};
+                    customers.value.forEach(c => {
+                        c.items.forEach(i => {
+                            if (!res[i.name]) res[i.name] = { name: i.name, qty: 0, cost: i.cost || 0, price: i.price || 0 };
+                            res[i.name].qty += i.qty;
+                        });
+                    });
+                    return res;
+                });
+
+                const totalProfit = computed(() => {
+                    let profit = 0;
+                    customers.value.forEach(c => {
+                        c.items.forEach(i => { profit += (i.price - (i.cost || 0)) * i.qty; });
+                    });
+                    return profit;
+                });
+
+                // --- 方法功能 ---
+                const submitAddCustomer = () => {
+                    if (tempCustomerName.value.trim()) {
+                        const newId = 'c' + Date.now();
+                        customers.value.push({ id: newId, name: tempCustomerName.value.trim(), items: [], isPaid: false });
+                        activeId.value = newId;
+                        showAddCustomerModal.value = false;
+                        tempCustomerName.value = '';
+                    }
+                };
+
+                const confirmDelete = (type, id) => {
+                    deleteConfirm.value = { show: true, type, id };
+                };
+
+                const executeDelete = () => {
+                    const { type, id } = deleteConfirm.value;
+                    if (type === 'customer') {
+                        customers.value = customers.value.filter(c => c.id !== id);
+                        if (activeId.value === id) activeId.value = '';
+                    } else if (type === 'product') {
+                        products.value = products.value.filter(p => p.id !== id);
+                    }
+                    deleteConfirm.value.show = false;
+                };
+
+                const handleAddProduct = () => {
+                    if (!newP.value.name) return;
+                    products.value.push({ ...newP.value, id: Date.now() });
+                    newP.value = { name: '', category: '', price: 0, cost: 0 };
+                };
+
+                const adjustQty = (pid, change) => {
+                    if (!activeCustomer.value) return;
+                    const item = activeCustomer.value.items.find(i => i.id === pid);
+                    if (item) {
+                        item.qty += change;
+                        if (item.qty <= 0) activeCustomer.value.items = activeCustomer.value.items.filter(i => i.id !== pid);
+                    } else if (change > 0) {
+                        const p = products.value.find(p => p.id === pid);
+                        activeCustomer.value.items.push({ id: p.id, name: p.name, price: p.price, cost: p.cost, qty: 1 });
+                    }
+                };
+
+                const getItemQty = (pid) => {
+                    if (!activeCustomer.value) return 0;
+                    const item = activeCustomer.value.items.find(i => i.id === pid);
+                    return item ? item.qty : 0;
+                };
+
+                const getBoughtQty = (name) => boughtData.value[name] || 0;
+                const openBatchModal = (name) => {
+                    batchModal.value = { show: true, itemName: name, qty: getBoughtQty(name) };
+                };
+                const saveBatchQty = () => {
+                    boughtData.value[batchModal.value.itemName] = batchModal.value.qty;
+                    batchModal.value.show = false;
+                };
+
+                const getCustomerTotal = (c) => c.items.reduce((s, i) => s + (i.price * i.qty), 0);
+                const togglePaid = (c) => { c.isPaid = !c.isPaid; };
+                const copyOrder = (c) => {
+                    let msg = `🌸 【${c.name}】訂單清單\n`;
+                    c.items.forEach(i => msg += `• ${i.name} x ${i.qty} = $${i.price * i.qty}\n`);
+                    msg += `💰 總收款：$${getCustomerTotal(c)}\n狀態：${c.isPaid ? '已結帳✨' : '待付款'}`;
+                    const el = document.createElement('textarea');
+                    el.value = msg; document.body.appendChild(el); el.select(); document.execCommand('copy'); document.body.removeChild(el);
+                    alert('已複製清單！');
+                };
+                
+                const exportCSV = () => {
+                    let csv = "商品名稱,總需,已買,成本,售價,預計利潤\n";
+                    Object.values(purchaseSummary.value).forEach(i => {
+                        csv += `${i.name},${i.qty},${getBoughtQty(i.name)},${i.cost},${i.price},${(i.price - i.cost) * i.qty}\n`;
+                    });
+                    const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement("a"); link.href = url; link.download = `代購清單.csv`; link.click();
+                };
+
+                return {
+                    view, products, customers, activeId, filterCat, search, payFilter,
+                    newP, categories, filteredProducts, activeCustomer, filteredCustomers,
+                    purchaseSummary, totalProfit, handleAddProduct, adjustQty, getItemQty,
+                    getCustomerTotal, togglePaid, copyOrder, exportCSV,
+                    showAddCustomerModal, tempCustomerName, submitAddCustomer,
+                    deleteConfirm, confirmDelete, executeDelete,
+                    batchModal, openBatchModal, saveBatchQty, getBoughtQty
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
+
